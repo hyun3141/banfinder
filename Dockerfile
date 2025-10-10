@@ -12,8 +12,7 @@ COPY . /app/
 RUN python -c "import cv2; import numpy; print(cv2.__version__)"
 
 EXPOSE 8080
-EXPOSE 8081
 
 ENV PORT 8080
 
-ENTRYPOINT ["./start_servers.sh"]
+CMD ["uvicorn", "pages.api:app", "--host", "0.0.0.0", "--port", "8080"]
