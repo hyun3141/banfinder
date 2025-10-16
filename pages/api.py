@@ -19,7 +19,7 @@ async def main(file: UploadFile = File(...)):
     img = Image.open(img_stream).convert("RGB")
 
     
-    result_gpt = classify_items(img)  # 당신이 이미 가진 함수 사용
+    result_gpt = classify_items_openai(img)  # 당신이 이미 가진 함수 사용
     model = YOLO('yolo_fine_tuned_best.pt')
     result_yolo = model(img)
 

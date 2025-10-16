@@ -7,7 +7,7 @@ uploaded_file = st.file_uploader("이미지 업로드", type=["png", "jpg", "jpe
 if uploaded_file is not None:
     files = {"file": uploaded_file.getvalue()}
     #response = requests.post("http://localhost:8081/api_test/process-image2")
-    response = requests.post("http://localhost:8081/api/process-image", files={"file": uploaded_file})
+    response = requests.post("https://banfinder-552366821867.asia-northeast3.run.app/api/process-image", files={"file": uploaded_file})
     if response.status_code == 200:
         res_json = response.json()
         st.write(res_json)
