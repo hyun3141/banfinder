@@ -21,20 +21,53 @@ from langchain_openai import ChatOpenAI
 from langchain.schema import SystemMessage, HumanMessage
 import cv2
 import numpy as np
+import time
+from google import genai
+from google.genai import types
 
 
-def ensure_api_key() -> str | None:
+JSON_RESPONSE_SCHEMA = types.Schema(
+    type=types.Type.OBJECT,
+    properties={
+        "sections": types.Schema(
+            type=types.Type.ARRAY,
+            description="이미지 분석 결과를 담는 2개의 섹션 문자열 배열입니다.",
+            items=types.Schema(
+                type=types.Type.STRING,
+                description="각 섹션의 내용 (1: 반입금지물품, 2: 물품분류)"
+            )
+        )
+    },
+    required=["sections"]
+)
+
+
+def ensure_api_key_openai() -> str | None:
     key = os.getenv("OPENAI_API_KEY")
     if not key:
         st.warning("OPENAI_API_KEY 가 설정되지 않았습니다.")
+    return key
+
+
+def ensure_api_key_gemini() -> str | None:
+    key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        st.warning("GEMINI_API_KEY 가 설정되지 않았습니다.")
     return key
 
 def image_to_data_uri(img: Image.Image, format_: str = "PNG") -> str:
     buf = io.BytesIO()
     img.save(buf, format=format_)
     b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    
+    # padding이 없거나 부족하면 '=' 추가
+    padding = 4 - (len(b64) % 4)
+    if padding and padding != 4:
+        b64 += '=' * padding
+
     mime = f"image/{format_.lower()}"
     return f"data:{mime};base64,{b64}"
+
 
 def build_system_prompt( depart: str = '', arrive: str = '') -> str:
 
@@ -42,31 +75,27 @@ def build_system_prompt( depart: str = '', arrive: str = '') -> str:
     json_str = df.to_json(orient="records", force_ascii=False, indent=2)
     return f"""
     나는 여행을 갈건데, 짐을 체크해볼거야.
-    너는 반드시 JSON 형식으로만 답해야 해. 
-    리스트 4개 요소를 차례대로 채워줘.
+    리스트 2개 요소를 차례대로 채워줘.
 
     구조 예시:
     [
       "첫번째 섹션 내용",
-      "두번째 섹션 내용",
-      "세번째 섹션 내용"
+      "두번째 섹션 내용"
     ]
 
     규칙:
-    - 한글로 답해줘.
-    - 빠진 물품도 추천해줘.
+    - 한글로 답해줘. json형식으로 답해줘.
     - 이동수단은 비행기야.
-    - 물품분류는 최대한 상세히 해줘.
     - 답변할 때 보기 편하게 개행을 해줘.
-    - 내용이 없어도 4가지가 나오게 해줘
     - 반입금지물품은 기내, 수하물로 구분되어 있는데 다음 JSON 데이터야.: {json_str}
     - 해당되는 물품 중 '비고'가 있으면 같이 알려주고, 해당되지 않으면 생략
     - 식별 정확도가 현저히 떨어지는 물품은 추측하지말고 패스해.
-
-    네가 채워야 할 3개 리스트 순서는 다음과 같아:
-    1. 물품분류(상세히 작성)
-    2. 반입금지물품(물품분류 리스트에 따라서 작성)
-    3. 빠진물품추천
+    - 불필요한 말은 하지말아주고 최대한 간략히 해줘.
+    - 반입금지물품은 금지사항이 있을경우에만 기내/위탁 가능여부 O/X만 알려주고, 비고가 있을 경우 작성
+    
+    네가 채워야 할 2개 리스트 순서는 다음과 같아:
+    1. 반입금지물품
+    2. 물품분류
     """
 
 
@@ -96,9 +125,9 @@ def analyze_image_with_yolo(image, model):
     return result_img
 
 
-def classify_items(img: Image.Image, depart: str = '', arrive: str = '') -> str:
+def classify_items_openai(img: Image.Image, depart: str = '', arrive: str = '') -> str:
     """Return a natural, conversational Korean description (not JSON)."""
-    llm = ChatOpenAI(model="gpt-5-mini", temperature=0.0)
+    llm = ChatOpenAI(model="gpt-5-mini", temperature=0.0, reasoning_effort="minimal", verbosity="high")
     data_uri = image_to_data_uri(img)
 
     system = SystemMessage(content=build_system_prompt(depart, arrive))
@@ -112,24 +141,84 @@ def classify_items(img: Image.Image, depart: str = '', arrive: str = '') -> str:
     ]
 
 
+    start_time = time.time()
     resp = llm.invoke([system, HumanMessage(content=user_content)])
+    end_time = time.time()
 
     usage = resp.response_metadata.get("token_usage", {})
     print("프롬프트 토큰:", usage.get("prompt_tokens"))
     print("출력 토큰:", usage.get("completion_tokens"))
     print("총 사용 토큰:", usage.get("total_tokens"))
+    print("응답에 걸린 시간:", end_time - start_time, "초")
 
     
     return resp.content  # 자연어 한국어 설명
 
-# def normalize_text(s: str) -> str:
-#     s = (s or "").strip().lower()
-#     s = re.sub(r"[^\w가-힣\s]", " ", s)
-#     s = re.sub(r"\s+", " ", s).strip()
-#     return s
 
-# def split_blocks(text: str) -> list:
-#     BLOCK_RE = re.compile(r"---section---")
-#     # ---SECTION--- 을 기준으로 자르고, 공백 블록은 제거
-#     parts = BLOCK_RE.split(text)
-#     return [p.strip() for p in parts if p.strip()]
+def classify_items_gemini(img: Image.Image, depart: str = '', arrive: str = '') -> str:
+    """Return a natural, conversational Korean description (not JSON) using Google Gemini."""
+
+    client = genai.Client()
+
+    # 이미지 데이터를 base64 등 바이너리로 준비
+    img_data = image_to_data_uri(img)
+    base64_str = img_data.split(",")[1]
+    image_bytes = base64.b64decode(base64_str)
+    
+    
+    # Google Gemini는 멀티모달 입력을 리스트 형태로 받음 (이미지 + 텍스트)
+    contents = [
+        types.Content(
+            role="user",
+            parts=[
+                types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+                types.Part.from_text(text=build_system_prompt(depart, arrive)),
+            ]
+        )
+    ]
+
+
+
+    config = types.GenerateContentConfig(
+        temperature=0,    # 창의성 수준 (0~2)
+        top_p=0,          # 확률 분포 컷오프 (기본 1.0)
+        response_mime_type="application/json",
+        response_schema=JSON_RESPONSE_SCHEMA, # 👈 스키마 객체 추가
+        max_output_tokens=10000,
+        # 추가 파라미터 가능
+    )
+    start_time = time.time()
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=contents,
+        config=config,
+    )
+    end_time = time.time()
+    
+
+    try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=contents,
+                config=config,
+            )
+            end_time = time.time()
+        
+            print("응답에 걸린 시간:", end_time - start_time, "초")
+
+            usage = response.usage_metadata
+            if usage:
+                print("프롬프트 토큰:", usage.prompt_token_count)
+                print("출력 토큰:", usage.candidates_token_count)
+                print("총 사용 토큰:", usage.total_token_count)
+
+            # response.text에 자연어 설명이 담겨 있음
+            return response.text
+    
+    except Exception as e:
+        print(f"🚨 Gemini API 호출 중 오류 발생: {e}")
+        # 오류 발생 시 빈 JSON 리스트 문자열을 반환하여 UI 코드의 json.loads 오류 방지
+        return '["API 호출 오류", "API 호출 오류"]' # 유효한 JSON 문자열 반환
+
+
+

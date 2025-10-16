@@ -13,6 +13,7 @@ from typing import List
 import datetime as dt
 import re
 import pandas as pd
+import time
 from rapidfuzz import process, fuzz
 import streamlit as st
 from PIL import Image
@@ -35,7 +36,7 @@ def main() -> None:
 
     st.set_page_config(page_title="공항앱", page_icon="✈️", layout="centered")
 
-    ensure_api_key()
+    ensure_api_key_gemini()
     # 경유지 리스트 초기화
 
     desc = []
@@ -74,10 +75,10 @@ def main() -> None:
                 img = Image.open(photo).convert("RGB")
                 st.image(img, caption=photo.name, use_container_width=True)
                 try:
-                    result = classify_items(img, depart, arrive)  # 당신이 이미 가진 함수 사용
+                    result = classify_items_openai(img, depart, arrive)  # 당신이 이미 가진 함수 사용
                     st.subheader("결과")
                     # 대화형(자연어) 응답이라면 그대로 표시
-                    
+                    print(result)
                     tab1, tab2, tab3, tab4, tab5 = st.tabs(["반입금지물품(OPENAI)  ", "반입금지물품(YOLO)", "물품분류  ", "빠진물품추천  ", "날씨  "])
 
 
@@ -85,7 +86,7 @@ def main() -> None:
                     result_list = json.loads(result)
                     #result_list = [1,1,1,1]
                     with tab1:
-                        st.write(result_list[1])
+                        st.write(result_list[0])
 
                     with tab2:
                         model = YOLO('yolo_fine_tuned_best.pt')
@@ -133,10 +134,15 @@ def main() -> None:
                                 if label_desc not in desc:
                                     desc.append(label_desc)
 
+
+                        start_time = time.perf_counter()  # 시작 시간 기록 (고해상도)
                         result_img = analyze_image_with_yolo(img, model)
-                        
                         # OpenCV 이미지(BGR)를 RGB로 변환해서 스트림릿에 출력
                         result_img_rgb = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
+                        end_time = time.perf_counter()  # 종료 시간 기록
+
+                        print("yolo-응답에 걸린 시간:", end_time - start_time, "초")
+
                         st.image(result_img_rgb, caption="분석 결과", use_container_width=True)
 
                         desc_str = ''.join(str(i) for i in desc)
@@ -145,12 +151,9 @@ def main() -> None:
 
 
                     with tab3:
-                        st.write(result_list[0])
+                        st.write(result_list[1])
 
                     with tab4:
-                        st.write(result_list[2])
-
-                    with tab5:
                         st.subheader("도착지 날씨")
                         try:
                             render_weather(arrive, arrive_date)
