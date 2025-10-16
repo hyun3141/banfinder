@@ -127,7 +127,7 @@ def analyze_image_with_yolo(image, model):
 
 def classify_items_openai(img: Image.Image, depart: str = '', arrive: str = '') -> str:
     """Return a natural, conversational Korean description (not JSON)."""
-    llm = ChatOpenAI(model="gpt-5-mini", temperature=0.0, reasoning_effort="minimal", verbosity="high")
+    llm = ChatOpenAI(model="gpt-5-mini", temperature=0.0, reasoning_effort="minimal", verbosity="low")
     data_uri = image_to_data_uri(img)
 
     system = SystemMessage(content=build_system_prompt(depart, arrive))
