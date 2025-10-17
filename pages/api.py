@@ -84,6 +84,7 @@ async def main(file: UploadFile = File(...)):
     b64_img = base64.b64encode(buf.getvalue()).decode("utf-8")
     data_uri = f"data:image/png;base64,{b64_img}"
 
+    print(result_gpt)
     # 4. JSON 형태로 응답
     return JSONResponse(content={
         "result_gpt_desc": result_gpt,
